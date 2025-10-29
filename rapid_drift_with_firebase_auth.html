@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rapid Drift — Firebase Auth + Firestore (Fixed)</title>
+  <style>
+    :root{--bg:#07121a;--accent:#33ffee;--panel:rgba(255,255,255,0.06);--glass:rgba(255,255,255,0.03)}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#e6f7f5;background:linear-gradient(180deg,#07101a 0%, #08121f 60%, #031018 100%);-webkit-font-smoothing:antialiased}
+    #app-root{position:relative;min-height:100vh}
+    .fade-in{animation:fadeIn 0.6s ease-out}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .overlay{position:fixed;inset:0;background:linear-gradient(180deg,rgba(2,6,10,0.8),rgba(2,6,10,0.95));display:flex;align-items:center;justify-content:center;z-index:9999}
+    .card{width:420px;max-width:92vw;background:rgba(10,14,20,0.95);border-radius:12px;padding:22px;box-shadow:0 10px 40px rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.05)}
+    .brand{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+    .logo{width:48px;height:48px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#9fd);display:flex;align-items:center;justify-content:center;font-weight:800;color:#012}
+    h2{margin:6px 0 12px}
+    .tabs{display:flex;gap:8px;margin-bottom:14px}
+    .tab{flex:1;padding:10px;border-radius:8px;text-align:center;background:rgba(255,255,255,0.02);cursor:pointer;transition:background 0.2s}
+    .tab.active{background:linear-gradient(90deg,rgba(51,255,238,0.15),rgba(159,255,238,0.08));border:1px solid rgba(51,255,238,0.08)}
+    form{display:flex;flex-direction:column;gap:10px}
+    input{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);color:inherit;transition:border-color 0.2s}
+    input:focus{outline:none;border-color:var(--accent)}
+    button.primary{padding:10px;border-radius:8px;border:none;background:linear-gradient(90deg,var(--accent),#9fd);color:#012;font-weight:700;cursor:pointer;transition:transform 0.2s}
+    button.primary:hover{transform:scale(1.02)}
+    button.ghost{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;cursor:pointer;transition:background 0.2s}
+    button.ghost:hover{background:rgba(255,255,255,0.05)}
+    .meta{font-size:13px;color:#9fd;margin-top:8px;min-height:18px}
+    .link{color:var(--accent);cursor:pointer;text-decoration:underline}
+    #user-bar{position:fixed;right:18px;top:18px;background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);display:flex;gap:8px;align-items:center;z-index:9000}
+    #game-wrap{position:relative;max-width:1200px;margin:18px auto;padding:14px;display:grid;grid-template-columns:1fr 320px;gap:12px}
+    canvas{display:block;width:100%;height:calc(100vh - 120px);background:linear-gradient(#0b1530,#04202a);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.6), inset 0 -30px 50px rgba(0,0,0,0.5)}
+    .panel{background:var(--panel);padding:12px;border-radius:10px;backdrop-filter:blur(6px)}
+    h1{margin:6px 0;font-size:18px;color:var(--accent)}
+    .small{font-size:13px;color:#aee}
+    .big-score{font-size:28px;font-weight:700;color:#fff}
+    .muted{opacity:0.7}
+    .footer{font-size:12px;color:#9fd}
+    .touch-controls{position:absolute;left:18px;bottom:28px;display:flex;gap:8px}
+    .touch-btn{width:56px;height:56px;border-radius:12px;background:var(--glass);display:flex;align-items:center;justify-content:center;font-weight:700;user-select:none}
+    .leaderboard{max-height:220px;overflow:auto;margin-top:8px}
+    .kbd{display:inline-block;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.03)}
+    .global-title{display:flex;justify-content:space-between;align-items:center}
+    @media (max-width:980px){#game-wrap{grid-template-columns:1fr}} 
+  </style>
+</head>
+<body>
+  <div id="app-root">
+    <div id="user-bar" style="display:none">
+      <div id="user-email" class="small"></div>
+      <button id="signOutBtn" class="ghost">Sign out</button>
+    </div>
+    <div id="auth-overlay" class="overlay fade-in"></div>
+
+    <div id="game-wrap" style="display:none">
+      <div class="panel">
+        <h1>Rapid Drift</h1>
+        <div class="small muted">One-file HTML5 drifting arcade.</div>
+        <canvas id="game"></canvas>
+        <div class="touch-controls" id="touchControls" style="display:none">
+          <div class="touch-btn" id="leftBtn">◀</div>
+          <div class="touch-btn" id="accelBtn">▲</div>
+          <div class="touch-btn" id="rightBtn">▶</div>
+          <div class="touch-btn" id="driftBtn">DRIFT</div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+          <button id="startBtn">Start / Restart</button>
+          <button id="gearBtn">Gear: Auto</button>
+          <button id="soundBtn">Sound: On</button>
+          <div style="flex:1"></div>
+          <div class="small muted">Controls: <span class="kbd">A / D</span> steer · <span class="kbd">W</span> throttle · <span class="kbd">S</span> brake · <span class="kbd">Space</span> drift</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <div>
+            <div class="big-score" id="score">0</div>
+            <div class="small muted">Distance · Drift · Combo</div>
+          </div>
+          <div style="text-align:right">
+            <div class="small muted">Speed</div>
+            <div id="speed" style="font-size:20px;font-weight:700">0 km/h</div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+
+        <div class="controls">
+          <div class="row"><div class="small muted">Difficulty</div><div><select id="difficulty"><option value="1">Easy</option><option value="1.4">Normal</option><option value="1.8">Hard</option><option value="2.5">Insane</option></select></div></div>
+          <div class="row"><div class="small muted">Car</div><div><select id="carSelect"><option value="0">Slick Runner</option><option value="1">Rally Ghost</option><option value="2">X-Drift</option></select></div></div>
+          <div class="row"><div class="small muted">Best</div><div id="best">0</div></div>
+          <div class="row"><div class="small muted">Combo</div><div id="combo">x1</div></div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+        <div>
+          <div class="small muted">Local leaderboard</div>
+          <div class="leaderboard" id="leaderboard"></div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+        <div>
+          <div class="small muted">My history</div>
+          <div class="leaderboard" id="myHistory"></div>
+
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:10px 0">
+
+          <div class="global-title"><div class="small muted">Global leaderboard</div><div class="small muted"><button id="refreshGlobal" class="ghost">Refresh</button></div></div>
+          <div class="leaderboard" id="globalLeaderboard"></div>
+        </div>
+
+        <div style="margin-top:10px" class="footer muted">Made with ❤️ — open this file in your browser to play. Want exports or a build for itch/desktop? Ask me.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Load libraries (use compat builds so this single file runs without bundler) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+  <script>
+  // ===== Replace with your Firebase project config =====
+  const firebaseConfig = {
+    apiKey: "AIzaSyCHxsPikWcS1fZZJwzZME6XH_lHayL2nNM",
+    authDomain: "rapid-drift-6d96f.firebaseapp.com",
+    projectId: "rapid-drift-6d96f",
+    storageBucket: "rapid-drift-6d96f.firebasestorage.app",
+    messagingSenderId: "536952282097",
+    appId: "1:536952282097:web:29ba004477ffe3ee6d0250",
+    measurementId: "G-28Z9CBQBE2"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const auth = firebase.auth();
+  const db = firebase.firestore();
+  const provider = new firebase.auth.GoogleAuthProvider();
+  </script>
+
+  <script>
+  // ===== React Auth UI (login/register + Google + reset) =====
+  const e = React.createElement;
+  const {useState} = React;
+
+  function AuthCard(){
+    const [mode,setMode]=useState('login');
+    const [email,setEmail]=useState('');
+    const [password,setPassword]=useState('');
+    const [message,setMessage]=useState('');
+    const [loading,setLoading]=useState(false);
+
+    async function handleSubmit(ev){
+      ev.preventDefault(); setMessage('');
+      if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){setMessage('Invalid email');return}
+      if(password.length<6){setMessage('Password ≥6 chars');return}
+      setLoading(true);
+      try{
+        if(mode==='register'){
+          const u = await auth.createUserWithEmailAndPassword(email,password);
+          await u.user.sendEmailVerification();
+          setMessage('Verification email sent. Please verify before playing.');
+          await auth.signOut();
+        } else {
+          await auth.signInWithEmailAndPassword(email,password);
+        }
+      }catch(err){setMessage(err.message)}finally{setLoading(false)}
+    }
+
+    async function googleSignIn(){try{await auth.signInWithPopup(provider);}catch(err){setMessage(err.message)}}
+    async function resetPassword(){if(!email){setMessage('Enter your email');return}try{await auth.sendPasswordResetEmail(email);setMessage('Reset email sent.')}catch(err){setMessage(err.message)}}
+
+    return e('div',{className:'card fade-in'},
+      e('div',{className:'brand'},e('div',{className:'logo'},'RD'),e('div',null,e('h2',null,'Sign in to Rapid Drift'))),
+      e('div',{className:'tabs'},
+        e('div',{className:'tab '+(mode==='login'?'active':''),onClick:()=>setMode('login')},'Login'),
+        e('div',{className:'tab '+(mode==='register'?'active':''),onClick:()=>setMode('register')},'Register')
+      ),
+      e('form',{onSubmit:handleSubmit},
+        e('input',{type:'email',placeholder:'Email',value:email,onChange:ev=>setEmail(ev.target.value)}),
+        e('input',{type:'password',placeholder:'Password',value:password,onChange:ev=>setPassword(ev.target.value)}),
+        e('button',{className:'primary',type:'submit',disabled:loading},mode==='register'?'Create Account':'Sign In'),
+        e('button',{className:'ghost',type:'button',onClick:googleSignIn},'Sign in with Google'),
+        e('div',{className:'link',onClick:resetPassword},'Forgot password?'),
+        e('div',{className:'meta'},message)
+      )
+    );
+  }
+
+  // Create a single React root for the overlay and always reuse it
+  const overlayRoot = document.getElementById('auth-overlay');
+  const reactRoot = ReactDOM.createRoot(overlayRoot);
+  // initial render: show AuthCard (React manages overlay content from now on)
+  reactRoot.render(React.createElement(AuthCard));
+
+  const userBar=document.getElementById('user-bar');
+  const userEmailEl=document.getElementById('user-email');
+  const signOutBtn=document.getElementById('signOutBtn');
+  const gameWrap=document.getElementById('game-wrap');
+  const overlay=document.getElementById('auth-overlay');
+
+  // Fetch global leaderboard and update UI
+  async function fetchGlobalLeaderboard(){
+    const out = document.getElementById('globalLeaderboard');
+    out.innerHTML = '<div class="small muted">Loading global leaderboard…</div>';
+    try{
+      const q = await db.collection('scores').orderBy('score','desc').limit(10).get();
+      const rows = q.docs.map((d,i)=>{ const data=d.data(); const when = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().toLocaleString() : (data.timestamp? new Date(data.timestamp).toLocaleString() : ''); return `<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);font-size:13px"><strong>#${i+1}</strong> ${data.score} <span style="float:right;opacity:0.7">${data.email||'anon'} · ${when}</span></div>` }).join('');
+      out.innerHTML = rows || '<div class="small muted">No global scores yet — be the first!</div>';
+    }catch(err){ out.innerHTML = '<div class="small muted">Failed to load global leaderboard: '+err.message+'</div>' }
+  }
+
+  document.getElementById('refreshGlobal').addEventListener('click', fetchGlobalLeaderboard);
+
+  // Fetch personal history (top 10 for current user)
+  async function fetchUserHistory(){
+    const out = document.getElementById('myHistory');
+    out.innerHTML = '<div class="small muted">Loading your scores…</div>';
+    try{
+      const user = auth.currentUser;
+      if(!user){ out.innerHTML = '<div class="small muted">Sign in to view your history.</div>'; return; }
+      const q = await db.collection('scores').where('uid','==',user.uid).orderBy('score','desc').limit(10).get();
+      if(q.empty){ out.innerHTML = '<div class="small muted">No scores yet — play to record your first run!</div>'; return; }
+      const rows = q.docs.map((d,i)=>{ const data=d.data(); const when = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().toLocaleString() : (data.timestamp? new Date(data.timestamp).toLocaleString() : ''); return `<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);font-size:13px"><strong>#${i+1}</strong> ${data.score} <span style="float:right;opacity:0.7">${when}</span></div>` }).join('');
+      out.innerHTML = rows;
+    }catch(err){ out.innerHTML = '<div class="small muted">Failed to load your history: '+err.message+'</div>' }
+  }
+
+  // Auth state handler: require email verified (unless Google)
+  auth.onAuthStateChanged(async user=>{
+    if(user){
+      if(!user.emailVerified && !user.providerData.some(p=>p.providerId==='google.com')){
+        // show verification prompt using the same React root
+        reactRoot.render(React.createElement(function VerifyCard(){
+          return e('div',{className:'card fade-in'},
+            e('h3',null,'Please verify your email before playing.'),
+            e('div',null,'We sent a verification link to '+(user.email||'')),
+            e('div',{style:{marginTop:12,display:'flex',gap:8}},
+              e('button',{className:'primary',onClick:()=>user.sendEmailVerification()},'Resend verification email'),
+              e('button',{className:'ghost',onClick:()=>auth.signOut()},'Back')
+            )
+          );
+        }));
+        overlay.style.display='flex';
+        gameWrap.style.display='none';
+        userBar.style.display='none';
+        return;
+      }
+
+      // user is good to play
+      overlay.style.display='none';
+      gameWrap.style.display='grid';
+      userBar.style.display='flex';
+      userEmailEl.textContent = user.email||user.displayName||'Signed in';
+      // render the AuthCard back into overlay (so it exists if they sign out)
+      reactRoot.render(React.createElement(AuthCard));
+      fetchGlobalLeaderboard();
+      fetchUserHistory();
+    } else {
+      // show auth UI
+      overlay.style.display='flex';
+      gameWrap.style.display='none';
+      userBar.style.display='none';
+      reactRoot.render(React.createElement(AuthCard));
+    }
+  });
+
+  signOutBtn.addEventListener('click',()=>auth.signOut());
+  </script>
+
+  <script>
+  /* Rapid Drift — single-file game (unchanged, with hook to save global score) */
+  (function(){
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    let W=1280,H=720; function resize(){
+      const rect = canvas.getBoundingClientRect();
+      W = Math.max(640, Math.floor(rect.width));
+      H = Math.max(360, Math.floor(rect.height));
+      canvas.width = Math.floor(W*devicePixelRatio);
+      canvas.height = Math.floor(H*devicePixelRatio);
+      canvas.style.width = rect.width+'px';
+      canvas.style.height = rect.height+'px';
+      ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // UI elements
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const speedEl = document.getElementById('speed');
+    const comboEl = document.getElementById('combo');
+    const lbEl = document.getElementById('leaderboard');
+    const startBtn = document.getElementById('startBtn');
+    const gearBtn = document.getElementById('gearBtn');
+    const soundBtn = document.getElementById('soundBtn');
+    const difficultySel = document.getElementById('difficulty');
+    const carSel = document.getElementById('carSelect');
+
+    // touch
+    const touchControls = document.getElementById('touchControls');
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints>0;
+    if(isTouch) touchControls.style.display='flex';
+
+    // Settings & state
+    let running=false,paused=false;
+    let settings = {gearAuto:true,sound:true,difficulty:1,car:0};
+    let rng = (s=>()=>{s=(s*1664525+1013904223)>>>0;return s/4294967296})(Math.floor(Math.random()*1000000));
+
+    // Load best and leaderboard
+    const KEY_BEST='rapid_best_v1';
+    const KEY_LB='rapid_leaderboard_v1';
+    let best = parseInt(localStorage.getItem(KEY_BEST)||'0',10);
+    let leaderboard = JSON.parse(localStorage.getItem(KEY_LB) || '[]');
+    bestEl.textContent = best;
+
+    // Rate-limit global score writes per session
+    let lastGlobalSave = 0; // timestamp ms
+    const GLOBAL_SAVE_COOLDOWN = 10 * 1000; // 10 seconds between saves
+
+    async function saveGlobalScoreIfNeeded(score){
+      try{
+        const user = auth.currentUser;
+        const now = Date.now();
+        if(!user) return; // not signed in
+        if(now - lastGlobalSave < GLOBAL_SAVE_COOLDOWN) return; // throttle
+        lastGlobalSave = now;
+        // write to 'scores' collection; document id autogenerated
+        await db.collection('scores').add({ uid: user.uid, email: user.email || null, score: score, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+        // refresh global leaderboard after save
+        if(window.fetchGlobalLeaderboard) window.fetchGlobalLeaderboard();
+        try{ if(typeof fetchUserHistory === 'function') fetchUserHistory(); }catch(e){console.warn(e);} 
+      }catch(err){ console.warn('Failed to save global score:', err); }
+    }
+
+    function saveScore(score){
+      if(score>best){best=score;localStorage.setItem(KEY_BEST,String(best));bestEl.textContent=best}
+      leaderboard.push({score:score,date:new Date().toISOString()});
+      leaderboard.sort((a,b)=>b.score-a.score);
+      leaderboard = leaderboard.slice(0,8);
+      localStorage.setItem(KEY_LB,JSON.stringify(leaderboard));
+      renderLeaderboard();
+      // save to Firestore if signed in (throttled)
+      saveGlobalScoreIfNeeded(Math.floor(score));
+    }
+
+    function renderLeaderboard(){
+      lbEl.innerHTML = leaderboard.map((e,i)=>`<div style=\"padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);font-size:13px\"><strong>#${i+1}</strong> ${e.score} <span style=\"float:right;opacity:0.7\">${(new Date(e.date)).toLocaleString()}</span></div>`).join('')
+    }
+    renderLeaderboard();
+
+    // expose fetchGlobalLeaderboard to global scope so game can call after saves
+    window.fetchGlobalLeaderboard = async function(){
+      const out = document.getElementById('globalLeaderboard');
+      out.innerHTML = '<div class="small muted">Loading global leaderboard…</div>';
+      try{
+        const q = await db.collection('scores').orderBy('score','desc').limit(10).get();
+        const rows = q.docs.map((d,i)=>{ const data=d.data(); const when = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().toLocaleString() : (data.timestamp? new Date(data.timestamp).toLocaleString() : ''); return `<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);font-size:13px"><strong>#${i+1}</strong> ${data.score} <span style="float:right;opacity:0.7">${data.email||'anon'} · ${when}</span></div>` }).join('');
+        out.innerHTML = rows || '<div class="small muted">No global scores yet — be the first!</div>';
+      }catch(err){ out.innerHTML = '<div class="small muted">Failed to load global leaderboard: '+err.message+'</div>' }
+    }
+
+    // Fetch personal history (top 10 for current user)
+    async function fetchUserHistory(){
+      const out = document.getElementById('myHistory');
+      out.innerHTML = '<div class="small muted">Loading your scores…</div>';
+      try{
+        const user = auth.currentUser;
+        if(!user){ out.innerHTML = '<div class="small muted">Sign in to view your history.</div>'; return; }
+        const q = await db.collection('scores').where('uid','==',user.uid).orderBy('score','desc').limit(10).get();
+        if(q.empty){ out.innerHTML = '<div class="small muted">No scores yet — play to record your first run!</div>'; return; }
+        const rows = q.docs.map((d,i)=>{ const data=d.data(); const when = data.timestamp && data.timestamp.toDate ? data.timestamp.toDate().toLocaleString() : (data.timestamp? new Date(data.timestamp).toLocaleString() : ''); return `<div style="padding:6px;border-bottom:1px solid rgba(255,255,255,0.02);font-size:13px"><strong>#${i+1}</strong> ${data.score} <span style="float:right;opacity:0.7">${when}</span></div>` }).join('');
+        out.innerHTML = rows;
+      }catch(err){ out.innerHTML = '<div class="small muted">Failed to load your history: '+err.message+'</div>' }
+    }
+
+    // Basic world
+    const world = { camera:{x:0,y:0,zoom:1}, terrain:[] };
+
+    // Car data
+    const cars = [
+      {name:'Slick Runner',mass:1200,color:'#33ffee',power:320,grip:1.0,driftFactor:0.85},
+      {name:'Rally Ghost',mass:1400,color:'#ffcd33',power:380,grip:0.95,driftFactor:0.78},
+      {name:'X-Drift',mass:1100,color:'#ff6bcd',power:420,grip:0.9,driftFactor:0.72}
+    ];
+
+    // Player
+    const player = { x:0,y:0,angle:0,velX:0,velY:0,speed:0,steer:0,throttle:0,brake:0,drifting:false,driftTimer:0,combo:1,distance:0,score:0 };
+
+    // Particles
+    const particles = [];
+    function spawnParticle(x,y,vx,vy,size,life,type){particles.push({x,y,vx,vy,size,life,age:0,type})}
+
+    // Input
+    const input = {left:false,right:false,accel:false,brake:false,drift:false};
+    window.addEventListener('keydown', e=>{if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft') input.left=true; if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') input.right=true; if(e.key==='w'||e.key==='W'||e.key==='ArrowUp') input.accel=true; if(e.key==='s'||e.key==='S'||e.key==='ArrowDown') input.brake=true; if(e.code==='Space') input.drift=true});
+    window.addEventListener('keyup', e=>{if(e.key==='a'||e.key==='A'||e.key==='ArrowLeft') input.left=false; if(e.key==='d'||e.key==='D'||e.key==='ArrowRight') input.right=false; if(e.key==='w'||e.key==='W'||e.key==='ArrowUp') input.accel=false; if(e.key==='s'||e.key==='S'||e.key==='ArrowDown') input.brake=false; if(e.code==='Space') input.drift=false});
+
+    // Touch buttons
+    if(isTouch){ ['leftBtn','rightBtn','accelBtn','driftBtn'].forEach(id=>{ const el=document.getElementById(id); el.addEventListener('touchstart',ev=>{ev.preventDefault(); if(id==='leftBtn') input.left=true; if(id==='rightBtn') input.right=true; if(id==='accelBtn') input.accel=true; if(id==='driftBtn') input.drift=true}); el.addEventListener('touchend',ev=>{ev.preventDefault(); if(id==='leftBtn') input.left=false; if(id==='rightBtn') input.right=false; if(id==='accelBtn') input.accel=false; if(id==='driftBtn') input.drift=false}); }) }
+
+    // Sounds
+    const AudioCtx = window.AudioContext || window.webkitAudioContext; let audioCtx = null; function ensureAudio(){ if(!audioCtx) audioCtx = new AudioCtx(); } function beep(freq,dur,vol=0.05){ if(!settings.sound) return; try{ensureAudio(); const o=audioCtx.createOscillator(); const g=audioCtx.createGain(); o.frequency.value=freq; g.gain.value=vol; o.connect(g); g.connect(audioCtx.destination); o.start(); g.gain.setValueAtTime(vol,audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+dur); o.stop(audioCtx.currentTime+dur+0.02);}catch(e){console.warn(e)} }
+
+    // Game reset
+    function reset(){ player.x=0;player.y=0;player.angle=0;player.velX=0;player.velY=0;player.speed=0;player.combo=1;player.distance=0;player.score=0;player.drifting=false;player.driftTimer=0;particles.length=0;world.camera.x=0;world.camera.y=0;spawnTerrain(); scoreEl.textContent='0';speedEl.textContent='0 km/h';comboEl.textContent='x1'; running=true;paused=false;lastT=performance.now(); }
+    function spawnTerrain(){world.terrain.length=0; let x=0,y=0,angle=0; for(let i=0;i<2000;i++){ angle += (rng()-0.5)*0.6; x += Math.cos(angle)*150; y += Math.sin(angle)*150; world.terrain.push({x,y,angle}) }}
+    function lerp(a,b,t){return a+(b-a)*t} function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+    function update(dt){ settings.difficulty = parseFloat(difficultySel.value); settings.car = parseInt(carSel.value,10); const car=cars[settings.car]; player.throttle = input.accel?1:0; player.brake = input.brake?1:0; const steerInput=(input.left? -1:0)+(input.right?1:0); const speedKmh = Math.hypot(player.velX,player.velY)*3.6; const steerSpeedFactor = clamp(1 - Math.abs(speedKmh)/300, 0.2, 1); player.steer = steerInput * 2.0 * steerSpeedFactor; const engineForce = player.throttle * car.power / car.mass * 200; const drag = 0.02 + Math.hypot(player.velX,player.velY)*0.01*settings.difficulty; const forwardX = Math.cos(player.angle); const forwardY = Math.sin(player.angle); player.velX += forwardX * engineForce * dt; player.velY += forwardY * engineForce * dt; if(player.brake){ player.velX *= 0.95; player.velY *= 0.95 } player.velX *= (1 - drag*dt*60); player.velY *= (1 - drag*dt*60); const localVX = player.velX * forwardX + player.velY * forwardY; const localVY = -player.velX * forwardY + player.velY * forwardX; const isDriftWant = input.drift && (Math.abs(speedKmh)>20 || player.throttle>0); if(isDriftWant){ if(!player.drifting){ player.drifting = true; player.driftTimer = 0; beep(600,0.04,0.02); } } else { if(player.drifting){ player.drifting=false; player.driftTimer=0; player.combo=1; comboEl.textContent='x'+player.combo; } } if(player.drifting){ player.driftTimer += dt; } const grip = car.grip * (player.drifting ? car.driftFactor : 1.0); const newLocalVY = lerp(localVY, 0, clamp(grip*dt*6,0,1)); player.velX = forwardX*localVX - forwardY*newLocalVY; player.velY = forwardY*localVX + forwardX*newLocalVY; const yaw = player.steer * (0.03 + Math.abs(localVY)/300) * (player.throttle?1.1:1.0); player.angle += yaw * dt * 60; player.x += player.velX * dt * 60; player.y += player.velY * dt * 60; player.speed = Math.hypot(player.velX,player.velY); player.distance += player.speed * dt * 60 * 0.02; if(player.drifting){ player.combo = Math.min(10, 1 + Math.floor(player.driftTimer*1.6 + Math.abs(localVY)/5)); comboEl.textContent = 'x'+player.combo; const driftScore = Math.floor((Math.abs(localVY) + player.speed*0.2) * player.combo * 0.1 * settings.difficulty); player.score += driftScore; for(let i=0;i<Math.min(2,Math.floor(Math.abs(localVY)/4));i++){ const px = player.x - forwardX * 10 + (rng()-0.5)*8; const py = player.y - forwardY * 10 + (rng()-0.5)*8; spawnParticle(px,py, (rng()-0.5)*0.6 - forwardX*player.speed*0.02, (rng()-0.5)*0.6 - forwardY*player.speed*0.02, 8 + rng()*6, 0.9 + rng()*0.5, 'smoke'); } } else { player.score += Math.floor(player.speed*0.02); } const maxSpeed = 45 + settings.difficulty*20 + car.power/30; const curSpeed = Math.hypot(player.velX,player.velY); if(curSpeed>maxSpeed){ const s = maxSpeed/curSpeed; player.velX*=s; player.velY*=s } for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.age += dt; p.x += p.vx*dt*60; p.y += p.vy*dt*60; if(p.age>p.life) particles.splice(i,1) } const cam = world.camera; cam.x = lerp(cam.x, player.x - W/2/1.6, clamp(5*dt,0,1)); cam.y = lerp(cam.y, player.y - H/2/1.6, clamp(5*dt,0,1)); scoreEl.textContent = Math.max(0,Math.floor(player.score)); speedEl.textContent = Math.floor(player.speed*3.6)+' km/h'; if(rng()<0.002*settings.difficulty){ spawnParticle(player.x + (rng()-0.5)*800, player.y + (rng()-0.5)*400, (rng()-0.5)*2, (rng()-0.5)*2, 20, 2, 'debris'); } }
+
+    function render(){ ctx.clearRect(0,0,W,H); const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#071525'); g.addColorStop(1,'#041720'); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); const cam = world.camera; ctx.save(); ctx.translate(-cam.x, -cam.y); ctx.lineWidth = 50; ctx.lineCap='round'; for(let i=0;i<world.terrain.length-1;i++){ const a = world.terrain[i]; const b = world.terrain[i+1]; const t = i/world.terrain.length; ctx.strokeStyle = `rgba(20,40,60,${0.6*(1-t)})`; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); } ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.setLineDash([12,18]); ctx.lineWidth=2; ctx.beginPath(); for(let i=0;i<world.terrain.length-1;i++){ const a=world.terrain[i]; const b=world.terrain[i+1]; ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y) } ctx.stroke(); ctx.setLineDash([]); for(const p of particles){ const alpha = clamp(1 - p.age/p.life,0,1); if(p.type==='smoke'){ ctx.beginPath(); ctx.fillStyle = `rgba(200,200,210,${0.05*alpha})`; ctx.ellipse(p.x,p.y,p.size*alpha,p.size*alpha*0.6,0,0,Math.PI*2); ctx.fill(); } else if(p.type==='debris'){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.age*2); ctx.fillStyle=`rgba(200,160,120,${0.9*alpha})`; ctx.fillRect(-p.size*0.3,-p.size*0.3,p.size*0.6,p.size*0.6); ctx.restore(); }} ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle); ctx.beginPath(); ctx.ellipse(0,8,36,14,0,0,Math.PI*2); ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill(); ctx.fillStyle = cars[settings.car].color; ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(28,0); ctx.quadraticCurveTo(18,-26,-26,-18); ctx.quadraticCurveTo(-34,-12,-36,0); ctx.quadraticCurveTo(-34,12,-26,18); ctx.quadraticCurveTo(18,26,28,0); ctx.fill(); ctx.stroke(); ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(4,-6); ctx.lineTo(-6,-10); ctx.lineTo(-14,-6); ctx.lineTo(-10,6); ctx.lineTo(4,2); ctx.fill(); const steerAngle = player.steer*0.6; function drawWheel(x,y,rot){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.fillStyle='rgba(0,0,0,0.9)';ctx.fillRect(-4,-8,8,16);ctx.restore()} drawWheel(18,18,0); drawWheel(-18,18,0); drawWheel(18,-18,steerAngle); drawWheel(-18,-18,steerAngle); ctx.restore(); ctx.save(); ctx.resetTransform(); ctx.fillStyle='rgba(255,255,255,0.02)'; ctx.fillRect(12,12,220,80); ctx.strokeStyle='rgba(255,255,255,0.03)'; ctx.strokeRect(12,12,220,80); ctx.fillStyle='#fff'; ctx.font='600 13px sans-serif'; ctx.fillText('Distance: '+Math.floor(player.distance)+' m',22,32); ctx.fillText('Score: '+Math.floor(player.score),22,50); ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.font='12px sans-serif'; ctx.fillText('Car: '+cars[settings.car].name,22,68); ctx.restore(); }
+
+    let lastT = performance.now(); function loop(t){ const dt = Math.min(0.033,(t-lastT)/1000); lastT = t; if(running && !paused){ update(dt); } render(); requestAnimationFrame(loop); } requestAnimationFrame(loop);
+
+    startBtn.addEventListener('click',()=>{ reset(); beep(800,0.04,0.02); });
+    gearBtn.addEventListener('click',()=>{ settings.gearAuto = !settings.gearAuto; gearBtn.textContent = 'Gear: '+(settings.gearAuto? 'Auto':'Manual'); });
+    soundBtn.addEventListener('click',()=>{ settings.sound = !settings.sound; soundBtn.textContent = 'Sound: '+(settings.sound? 'On':'Off'); if(settings.sound) beep(900,0.04,0.03); });
+    difficultySel.addEventListener('change',()=>{ settings.difficulty = parseFloat(difficultySel.value); });
+    carSel.addEventListener('change',()=>{ settings.car = parseInt(carSel.value,10); });
+
+    // Auto-start
+    reset();
+
+    // Save on unload
+    window.addEventListener('beforeunload', ()=>{ saveScore(Math.floor(player.score)); });
+
+    // Also save if player presses Enter (explicit save)
+    window.addEventListener('keydown', e=>{ if(e.key==='p' || e.key==='P') { paused = !paused; beep(300,0.04,0.03); } if(e.key==='Enter'){ saveScore(Math.floor(player.score)); beep(1000,0.04,0.02); } });
+
+    // Initial resize
+    resize();
+  })();
+  </script>
+
+</body>
+</html>
